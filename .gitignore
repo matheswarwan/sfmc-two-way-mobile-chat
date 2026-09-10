@@ -12,3 +12,4 @@ coverage/
 user-requirement.md
 *.tsbuildinfo
 data/
+.wrangler/

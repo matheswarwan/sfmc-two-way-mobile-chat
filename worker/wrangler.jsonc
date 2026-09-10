@@ -1,0 +1,35 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "sfmc-two-way-mobile-chat",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+  // Node built-ins used by the shared code: node:crypto for HMAC and UUIDs.
+  "compatibility_flags": ["nodejs_compat"],
+
+  "account_id": "51f0411bb44bb1022dbe10412e1b5b9c",
+
+  // The chat UI, built by the web workspace.
+  "assets": { "directory": "../web/dist", "binding": "ASSETS" },
+
+  "durable_objects": {
+    "bindings": [{ "name": "CONVERSATIONS", "class_name": "ConversationHub" }]
+  },
+
+  // SQLite-backed Durable Object: its storage API is synchronous, which lets the
+  // existing ConversationStore port across unchanged, and the same object holds
+  // the WebSocket connections so a message reaches every open tab.
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ConversationHub"] }],
+
+  // Workers cannot hold a setInterval, so the inbound Data Extension poll runs
+  // on a schedule instead. One minute is the finest granularity available.
+  "triggers": { "crons": ["* * * * *"] },
+
+  "observability": { "enabled": true },
+
+  "vars": {
+    "SFMC_MODE": "live",
+    "SFMC_KEYWORD": "CHAT",
+    "SFMC_INBOUND_DE_KEY": "ChatInbound",
+    "SFMC_DEFINITION_KEY": "sfmc-chat-outbound"
+  }
+}
