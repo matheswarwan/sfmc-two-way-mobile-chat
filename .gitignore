@@ -1,0 +1,14 @@
+node_modules/
+dist/
+build/
+*.log
+.env
+.env.local
+.DS_Store
+data/*.db
+coverage/
+
+# Per project documentation rules, requirements are not pushed
+user-requirement.md
+*.tsbuildinfo
+data/

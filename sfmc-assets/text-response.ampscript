@@ -1,0 +1,106 @@
+%%[
+/*
+  Text Response message body - inbound capture for the chat app.
+
+  This runs inside MobileConnect when a mobile-originated message arrives on the
+  keyword this message is attached to. It is the only place inbound SMS can be
+  observed synchronously, because Salesforce publishes no webhook or Journey
+  entry source for mobile-originated SMS.
+
+  IMPORTANT - this body renders synchronously in the customer's reply path.
+  Anything slow or throwing here delays or breaks their SMS. Keep it cheap and
+  never let an error escape.
+*/
+
+/* Msg(0) returns the entire inbound message. Verb is the first token, which
+   MobileConnect treats as the keyword; Nouns is everything after it. For a chat
+   product the customer types arbitrary text, so we keep the whole thing. */
+SET @rawMessage = Msg(0)
+SET @keyword    = Msg(0).Verb
+SET @body       = Msg(0).Nouns
+
+/* When the message arrived through a conversation window rather than by
+   matching a keyword, Nouns can be empty while the real text sits in the raw
+   message. Prefer the raw text and fall back only if it is blank. */
+IF Empty(@rawMessage) THEN
+  SET @text = @body
+ELSE
+  SET @text = @rawMessage
+ENDIF
+
+SET @mobileNumber = AttributeValue("MobileNumber")
+SET @subscriberKey = _subscriberkey
+SET @receivedAt   = FormatDate(Now(), "yyyy-MM-ddTHH:mm:ss.fff", "", "UTC")
+SET @messageId    = Concat(@mobileNumber, ":", @receivedAt)
+
+/* ---------------------------------------------------------------------------
+   Path 1 - durable capture. DOCUMENTED and therefore the floor.
+
+   InsertData() is one of exactly two non-mobile AMPscript functions Salesforce
+   names as usable in MobileConnect messages:
+   "In addition to these mobile-specific functions, you can also use the
+    InsertData() and DeleteData() functions in MobileConnect messages."
+
+   The app polls this Data Extension. Even if Path 2 works, keep this: it is the
+   audit log and the reconciliation source.
+--------------------------------------------------------------------------- */
+InsertData(
+  "ChatInbound",
+  "MessageId",    @messageId,
+  "MobileNumber", @mobileNumber,
+  "SubscriberKey",@subscriberKey,
+  "MessageBody",  @text,
+  "Keyword",      @keyword,
+  "ShortCode",    AttributeValue("ShortCode"),
+  "ReceivedAt",   @receivedAt
+)
+
+/* ---------------------------------------------------------------------------
+   Path 2 - real-time push. UNVERIFIED. Commented out on purpose.
+
+   No Salesforce documentation states that AMPscript HTTP functions work inside
+   a MobileConnect message, and none states they do not. No official example
+   shows one. Uncomment ONLY after the sandbox experiment in plan.md confirms
+   the POST arrives AND the customer still receives their reply.
+
+   HttpPost2 is used rather than HttpPost so the call cannot raise: the last
+   argument set to false keeps a failing endpoint from breaking the reply.
+
+SET @payload = Concat(
+  '{"mobileNumber":"', @mobileNumber,
+  '","body":"',        Replace(@text, '"', '\"'),
+  '","shortCode":"',   AttributeValue("ShortCode"),
+  '","messageId":"',   @messageId,
+  '","receivedAt":"',  @receivedAt, '"}'
+)
+
+SET @statusCode = HttpPost2(
+  "https://YOUR_APP_HOST/inbound/ampscript",
+  "application/json",
+  @payload,
+  false,
+  @response
+)
+--------------------------------------------------------------------------- */
+
+/* ---------------------------------------------------------------------------
+   Re-arm the conversation so the customer's NEXT message routes back here
+   without needing a keyword.
+
+   SetSmsConversationNextKeyword "doesn't set the keyword immediately, but
+   rather when the contact sends the next message" - which is exactly the
+   behaviour a multi-turn chat needs.
+
+   Note this cannot be armed from the outbound side: the app sends with
+   Override:true, which replaces the saved message body, and no documentation
+   says an API-supplied override string is evaluated as executable AMPscript.
+   The first inbound turn therefore relies on the code's default keyword; every
+   turn after that is held open by this call.
+--------------------------------------------------------------------------- */
+SetSmsConversationNextKeyword(
+  AttributeValue("ShortCode"),
+  @mobileNumber,
+  "CHAT"
+)
+]%%
+
